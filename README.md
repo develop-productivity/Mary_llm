@@ -21,7 +21,7 @@ CUDA == 12.2
 | stage | datasets size | times | platform |
 | --- | --- | --- | --- |
 | pretrain | 1.3M | 4.5h | 8x3090 |
-| sft | 1.4M |  | 8x3090 |
+| sft | 1.4M | 6.3h | 8x3090 |
 | dpo |  |  | 8x3090 |
 
 # QuickStart
@@ -29,7 +29,7 @@ CUDA == 12.2
 
 You should clone this project and create a python env.
 ```
-git clone https://github.com/develop-productivity/Marry_mllm.git
+git clone https://github.com/develop-productivity/Mary_llm.git
 cd Marry_mllm
 conda create -n env_name python=3.10
 pip install -r requirments.txt

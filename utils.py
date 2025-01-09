@@ -8,6 +8,34 @@ import torch
 from peft import TaskType, LoraConfig, get_peft_model
 from transformers import  AutoModelForCausalLM, AutoConfig
 import torch.nn.functional as F
+from typing import List, Literal, Optional, Tuple, TypedDict
+
+
+Role = Literal["system", "user", "assistant"]
+
+class Message(TypedDict):
+    role: Role
+    content: str
+Dialog = List[Message]
+
+class CompletionPrediction(TypedDict, total=False):
+    generation: str
+    tokens: List[str]  # not required
+    logprobs: List[float]  # not required
+
+
+class ChatPrediction(TypedDict, total=False):
+    generation: Message
+    tokens: List[str]  # not required
+    logprobs: List[float]  # not required
+
+    
+B_INST, E_INST = "[INST]", "[/INST]"
+B_SYS, E_SYS = "<<SYS>>\n", "\n<</SYS>>\n\n"
+
+SPECIAL_TAGS = [B_INST, E_INST, "<<SYS>>", "<</SYS>>"]
+UNSAFE_ERROR = "Error: special tags are not allowed as part of the prompt."
+
 
 def rank0_print(*args):
     if dist.is_initialized():
@@ -67,27 +95,28 @@ def get_peft_state_maybe_zero_3(named_params, bias):
     to_return = {k: maybe_zero_3(v, ignore_status=True) for k, v in to_return.items()}
     return to_return
 
-def get_model(model_args, training_args):
-    AutoConfig.register("vlm_model", VLMConfig)
-    AutoModelForCausalLM.register(VLMConfig, VLM)
-    model = AutoModelForCausalLM.from_pretrained(model_args.model_path, torch_dtype=torch.float32)
-    if training_args.lora_enable:
-        from peft import LoraConfig, get_peft_model
-        rank0_print("Adding LoRA adapters...")
-        lora_config = LoraConfig(
-            r=training_args.lora_r,
-            lora_alpha=training_args.lora_alpha,
-            target_modules=training_args.lora_target,
-            lora_dropout=training_args.lora_dropout,
-            bias=training_args.lora_bias,
-            task_type="CAUSAL_LM",
-        )
-        # if training_args.bits == 16:
-        #     if training_args.bf16:
-        #         model.to(torch.bfloat16)
-        #     if training_args.fp16:
-        #         model.to(torch.float16)
-        
-        model = get_peft_model(model, lora_config)
-    return model
+def sample_top_p(probs, p):
+    """
+    Perform top-p (nucleus) sampling on a probability distribution.
+
+    Args:
+        probs (torch.Tensor): Probability distribution tensor.
+        p (float): Probability threshold for top-p sampling.
+
+    Returns:
+        torch.Tensor: Sampled token indices.
+
+    Note:
+        Top-p sampling selects the smallest set of tokens whose cumulative probability mass
+        exceeds the threshold p. The distribution is renormalized based on the selected tokens.
+
+    """
+    probs_sort, probs_idx = torch.sort(probs, dim=-1, descending=True)
+    probs_sum = torch.cumsum(probs_sort, dim=-1)
+    mask = probs_sum - probs_sort > p
+    probs_sort[mask] = 0.0
+    probs_sort.div_(probs_sort.sum(dim=-1, keepdim=True))
+    next_token = torch.multinomial(probs_sort, num_samples=1)
+    next_token = torch.gather(probs_idx, -1, next_token)
+    return next_token
 

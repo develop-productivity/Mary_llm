@@ -41,6 +41,7 @@ class ModelArguments:
 class DataArguments:
     data_path: Optional[str] = field(default="datasets/llm/pretrain/mobvoi_seq_monkey_general_open_corpus.jsonl")
     data_max_seq_length: int = field(default=512)
+    data_ratio: float = field(default=0.1)
 
 
 @dataclass
@@ -124,13 +125,13 @@ def get_hf_datasets(data_path, tokenizer, max_seq_len=512):
 
 
 class LLMDataset(Dataset):
-    def __init__(self, data_path, tokenizer, max_seq_len=512):
+    def __init__(self, data_path, tokenizer, max_seq_len=512, data_ratio=0.1):
         super().__init__()
         self.data_path = data_path
         self.tokenizer = tokenizer
         self.max_seq_len = max_seq_len
         self.data = []
-        data_ratio = 0.1
+        data_ratio = data_ratio
         # we use 80% of the data for training
         with open(data_path, "r", encoding="utf-8") as f:
             lines = f.readlines()
@@ -138,8 +139,9 @@ class LLMDataset(Dataset):
             for i, line in enumerate(lines):
                 if i >= data_ratio * total_lines:
                     break
-                data = json.loads(line)
-                self.data.append(data["text"])
+                # data = json.loads(line)
+                # self.data.append(data["text"])
+                self.data.append(line)
                 # count += 1
                 # if count > 100:
                 #     break
@@ -148,13 +150,16 @@ class LLMDataset(Dataset):
         return len(self.data)
     
     def __getitem__(self, idx):
-        text = self.data[idx]
+        line = self.data[idx]
+        text = json.loads(line)["text"]
+        # text = self.data[idx]
         text = "<s>" + text + "</s>"
         input_ids = self.tokenizer(text, return_tensors="pt", padding='max_length', truncation=True, max_length=self.max_seq_len)["input_ids"]
         input_ids = input_ids.squeeze(0)
         labels = input_ids.clone()
         # we shift the labels and input_ids here
         # return {"input_ids": input_ids[:-1], "labels": labels[1:], "position_ids": torch.tensor(0, dtype=torch.long)}
+        
         # do not need shift the labels and input_ids here
         return {"input_ids": input_ids, "labels": labels, "position_ids": torch.tensor(0, dtype=torch.long)}
 
@@ -243,7 +248,7 @@ if __name__ == "__main__":
     tokenizer = AutoTokenizer.from_pretrained(model_args.tokenizer_path)
     # data_collator = DataCollator(tokenizer)
     # train_dataset = get_hf_datasets(data_args.data_path, tokenizer, max_seq_len=512)
-    train_dataset = LLMDataset(data_args.data_path, tokenizer, max_seq_len=512)
+    train_dataset = LLMDataset(data_args.data_path, tokenizer, max_seq_len=512, data_ratio=data_args.data_ratio)
     rank0_print(f"Dataset size: {len(train_dataset)}")
     # test_datasets(train_dataset)
 
